@@ -431,9 +431,24 @@ class User < ApplicationRecord
   end
 
   def sign_up_email_requires_approval?
-    return false unless email.present? || unconfirmed_email.present?
+    return false if email.blank?
 
-    EmailDomainBlock.requires_approval?(email.presence || unconfirmed_email, attempt_ip: sign_up_ip)
+    _, domain = email.split('@', 2)
+    return false if domain.blank?
+
+    records = []
+
+    # Doing this conditionally is not very satisfying, but this is consistent
+    # with the MX records validations we do and keeps the specs tractable.
+    if validate_email_dns?
+      Resolv::DNS.open do |dns|
+        dns.timeouts = 5
+
+        records = dns.getresources(domain, Resolv::DNS::Resource::IN::MX).to_a.map { |e| e.exchange.to_s }.compact_blank
+      end
+    end
+
+    EmailDomainBlock.requires_approval?(records + [domain], attempt_ip: sign_up_ip)
   end
 
   def open_registrations?
